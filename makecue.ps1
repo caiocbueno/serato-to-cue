@@ -1,4 +1,4 @@
-# POWERJAIL SERATO IMPORTER (V12: Wrap Support - No Popup)
+# POWERJAIL SERATO IMPORTER (V12.2: Subpasta "CueSheets")
 
 # --- CONFIGURATION ---
 function Get-Config {
@@ -24,7 +24,7 @@ function Clean-Text($str) {
     return $str.Trim()
 }
 
-# --- PARSER: LOCAL CLIPBOARD (Multiline Smart Logic) ---
+# --- PARSER: LOCAL CLIPBOARD ---
 function Parse-SeratoHistoryText($rawLines) {
     $parsedTracks = @()
     $firstStartTime = $null
@@ -33,72 +33,44 @@ function Parse-SeratoHistoryText($rawLines) {
     $culture = [System.Globalization.CultureInfo]::InvariantCulture
     $timeRegex = "(\d{1,2}:\d{2}:\d{2})"
 
-    # 1. Extract Date from Header
     foreach ($line in $rawLines) {
         if ($line -match "^(\d{2}/\d{2}/\d{4})") { $mixDate = $matches[1]; break }
     }
 
-    # 2. Iterate lines with a "Line Buffer"
     $lineBuffer = ""
-
     foreach ($line in $rawLines) {
         $line = $line.Trim()
-        # Skip junk
         if ($line -eq "" -or $line -match "^-" -or $line -match "^Song\s+.*Start Time") { continue }
         
-        # Check if this line has the "Start Time" (The trigger to process the track)
         if ($line -match $timeRegex) {
             $foundTime = $matches[1]
-            
-            # Get text on this specific line before the time
             $textOnTimeLine = ($line -split $timeRegex)[0].Trim()
-            
-            # Combine with whatever was in the buffer (previous lines)
             $fullTrackString = "$lineBuffer $textOnTimeLine".Trim()
-            
-            # Reset buffer for next track
             $lineBuffer = ""
             
-            # SPLIT BY 2+ SPACES (Serato's visual column separator)
             $cols = $fullTrackString -split "\s{2,}"
-            
             if ($cols.Count -ge 2) {
-                # Logic: Last column is Artist, everything before is Title
                 $artist = $cols[-1]
                 $title = ($cols[0..($cols.Count-2)] -join " ")
             } else {
-                $title = $cols[0]
-                $artist = "Unknown"
+                $title = $cols[0]; $artist = "Unknown"
             }
 
-            # Relative Time Logic
             try {
                 $dateBase = if ($mixDate) { $mixDate } else { (Get-Date).ToString("dd/MM/yyyy") }
                 $fullDateTimeStr = "$dateBase $foundTime"
                 $currDate = [DateTime]::ParseExact($fullDateTimeStr, $dateFormat, $culture)
-                
                 if ($null -eq $firstStartTime) {
-                    $firstStartTime = $currDate
-                    $relTime = "00:00:00"
+                    $firstStartTime = $currDate; $relTime = "00:00:00"
                 } else {
                     $diff = $currDate - $firstStartTime
                     if ($diff.TotalSeconds -lt 0) { $diff = $diff.Add([TimeSpan]::FromDays(1)) }
                     $relTime = $diff.ToString("hh\:mm\:ss")
                 }
-
-                $parsedTracks += [PSCustomObject]@{
-                    Time = $relTime
-                    Title = Clean-Text $title
-                    Artist = Clean-Text $artist
-                }
+                $parsedTracks += [PSCustomObject]@{ Time = $relTime; Title = Clean-Text $title; Artist = Clean-Text $artist }
             } catch { }
-
         } else {
-            # No time on this line? It must be a wrapped Title/Artist.
-            # Add it to the buffer and wait for the time line.
-            if ($line -notmatch "^\d{2}/\d{2}/\d{4}") {
-                $lineBuffer += " $line"
-            }
+            if ($line -notmatch "^\d{2}/\d{2}/\d{4}") { $lineBuffer += " $line" }
         }
     }
     return @{ Date = $mixDate; Tracks = $parsedTracks }
@@ -155,13 +127,30 @@ function Save-CueFile($playlistObj, $filenameOverride) {
     $baseName = $baseName -replace "\.mp3$", "" -replace "\.MP3$", ""
     $safeBaseName = $baseName -replace '[<>:"/\\|?*]', ''
     
-    $saveDir = Get-ScriptPath
+    # --- SUBFOLDER LOGIC START ---
+    $scriptRoot = Get-ScriptPath
+    $subFolderName = "CueSheets"
+    $saveDir = Join-Path $scriptRoot $subFolderName
+    
+    # Create folder if it doesn't exist
+    if (-not (Test-Path $saveDir)) {
+        New-Item -ItemType Directory -Path $saveDir -Force | Out-Null
+    }
+    # --- SUBFOLDER LOGIC END ---
+
     $counter = 1
     $finalBaseName = $safeBaseName
+    
+    # Check for duplicates INSIDE the subfolder
     while (Test-Path (Join-Path $saveDir "$finalBaseName.cue")) {
         $finalBaseName = "$safeBaseName ($counter)"; $counter++
     }
     $outputFile = Join-Path $saveDir "$finalBaseName.cue"
+    
+    # Audio file is assumed to be in the ROOT folder (one level up from CueSheets)
+    # But CUE files usually look for audio in the SAME folder. 
+    # If you keep MP3s in the root, standard CUE syntax works if player looks relatively.
+    # For now, we keep standard syntax:
     $finalAudioFile = "$baseName.mp3"
 
     $sb = New-Object System.Text.StringBuilder
@@ -199,7 +188,9 @@ function Save-CueFile($playlistObj, $filenameOverride) {
     }
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($outputFile, $sb.ToString(), $utf8NoBom)
-    Write-Host "Saved: $finalBaseName.cue" -ForegroundColor Green
+    
+    # Show user where it saved
+    Write-Host "Saved to .\$subFolderName\$finalBaseName.cue" -ForegroundColor Green
 }
 
 # --- MAIN MENU ---
@@ -207,12 +198,14 @@ $cfg = Get-Config
 $defaultDJ = if ($cfg) { $cfg.DefaultPerformer } else { "" }
 $lastMode = if ($cfg) { $cfg.LastMode } else { "1" }
 
-Write-Host "--- DJ CUE AUTOMATION V12 (Wrap Support) ---" -ForegroundColor Cyan
+Write-Host "--- DJ CUE AUTOMATION V12.2 (Organized) ---" -ForegroundColor Cyan
 Write-Host "1. SERATO WEBSITE: Single Playlist URL" -ForegroundColor Gray
 Write-Host "2. LOCAL CLIPBOARD: History Export (Any Layout)" -ForegroundColor Magenta
 Write-Host "3. SERATO WEBSITE: Batch Profile Download" -ForegroundColor Yellow
 $mode = Read-Host "Choose Mode (Default: $lastMode)"
 if ($mode -eq "") { $mode = $lastMode }
+
+Save-Config $defaultDJ $mode
 
 if ($mode -eq "3") {
     $profileUrl = Read-Host "Paste Serato Profile URL"
@@ -242,13 +235,11 @@ if ($mode -eq "3") {
     if (-not $rawLines) { Write-Host "Clipboard is empty!" -ForegroundColor Red; exit }
     Write-Host "Loaded $($rawLines.Count) lines." -ForegroundColor Green
 
-    # Run the new Wrap-Safe Parser
     $result = Parse-SeratoHistoryText $rawLines
     $trackData = $result.Tracks
     $date = $result.Date
     
     if ($trackData.Count -eq 0) {
-        # Fallback to Simple List if parsing failed
         Write-Host "Complex parse failed. Trying simple list..." -ForegroundColor DarkGray
         $cleanLines = $rawLines | Where-Object { $_.Trim() -and $_ -notmatch "^\d{1,2}:\d{2}\s*[aApP][mM]$" }
         for ($i=0; $i -lt $cleanLines.Count; $i+=2) {
@@ -267,11 +258,12 @@ if ($mode -eq "3") {
     $performer = Read-Host $performerPrompt
     if ($performer -eq "") { $performer = $defaultDJ }
     
+    Save-Config $performer $mode
+
     $title = Read-Host "Enter Mix Title"
     if (-not $date) { $date = Read-Host "Enter Date" }
     $fname = Read-Host "Enter Filename"
 
-    Save-Config $performer $mode
     $data = [PSCustomObject]@{ Title = $title; Performer = $performer; Date = $date; Tracks = $trackData }
     Save-CueFile $data $fname
 }
