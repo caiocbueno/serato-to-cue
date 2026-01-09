@@ -40,7 +40,9 @@ Now rewritten in Python for better performance, stability, and compatibility wit
    ```bash
    pip install -r requirements.txt
    ```
-
+> **🐧 Linux Users:** You may need to install a clipboard utility:
+   > `sudo apt install xclip` or `sudo pacman -S xclip`
+   
 ---
 
 ## 📖 How to Use
