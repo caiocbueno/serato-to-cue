@@ -42,7 +42,7 @@ Now rewritten in Python for better performance, stability, and compatibility wit
    ```
 > **🐧 Linux Users:** You may need to install a clipboard utility:
    > `sudo apt install xclip` or `sudo pacman -S xclip`
-   
+
 ---
 
 ## 📖 How to Use
@@ -82,7 +82,7 @@ The script creates a `config.json` file in the same folder after the first run.
 
 ## 📂 Project Structure
 
-* `main.py`: The entry point of the application.
+* `serato2cue.py`: The entry point of the application.
 * `parsers.py`: Logic for web scraping and clipboard text processing.
 * `generator.py`: Logic for creating the .cue files.
 * `utils.py`: Helper functions and configuration management.
